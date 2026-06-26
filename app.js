@@ -137,10 +137,16 @@ function applySplashImage() {
 
   if (!TERMINAL_SPLASH_IMAGE) {
     splashBg.style.backgroundImage = '';
+    splashBg.style.backgroundSize = '';
+    splashBg.style.backgroundRepeat = '';
+    splashBg.style.backgroundPosition = '';
     return;
   }
 
   splashBg.style.backgroundImage = 'url(\"' + TERMINAL_SPLASH_IMAGE.replace(/\"/g, '%22') + '\")';
+  splashBg.style.backgroundSize = 'contain';
+  splashBg.style.backgroundRepeat = 'no-repeat';
+  splashBg.style.backgroundPosition = 'center';
 }
 
 function buildScreenBanners() {
