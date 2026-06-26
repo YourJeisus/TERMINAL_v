@@ -12,6 +12,8 @@ var CATEGORY_SCREEN_MAP = {
   '3': 'museum',     // Музей иллюзий
   '4': 'skypark'     // Skypark
 };
+var CATEGORY_SCREEN_SEQUENCE = ['tickets', 'alpaka', 'museum', 'skypark'];
+var runtimeCategoryScreenMap = {};
 
 var loadedCategories = [];
 var dayTypesCalendar = []; // calendar of day types for 100 days ahead
@@ -184,6 +186,86 @@ function getCategoryPhotoSources(cat) {
   return [value];
 }
 
+function assignCategoryScreens(categories) {
+  var usedScreens = {};
+  runtimeCategoryScreenMap = {};
+
+  categories.forEach(function(cat) {
+    var legacyScreenKey = CATEGORY_SCREEN_MAP[String(cat.category_id)];
+    if (legacyScreenKey && usedScreens[legacyScreenKey] !== true) {
+      runtimeCategoryScreenMap[String(cat.category_id)] = legacyScreenKey;
+      usedScreens[legacyScreenKey] = true;
+    }
+  });
+
+  categories.forEach(function(cat) {
+    var categoryId = String(cat.category_id);
+    if (runtimeCategoryScreenMap[categoryId]) return;
+
+    for (var i = 0; i < CATEGORY_SCREEN_SEQUENCE.length; i++) {
+      var screenKey = CATEGORY_SCREEN_SEQUENCE[i];
+      if (usedScreens[screenKey] === true) continue;
+
+      runtimeCategoryScreenMap[categoryId] = screenKey;
+      usedScreens[screenKey] = true;
+      break;
+    }
+  });
+}
+
+function getScreenKeyForCategory(cat) {
+  return runtimeCategoryScreenMap[String(cat.category_id)] || '';
+}
+
+function isTariffAvailableForToday(tariff, todayType) {
+  if (!todayType) {
+    return true;
+  }
+
+  return tariff.day_type === todayType || tariff.day_type === 'universal';
+}
+
+function updateMainCategoryCards(categories) {
+  var visibleScreenKeys = {};
+
+  categories.forEach(function(cat) {
+    var screenKey = getScreenKeyForCategory(cat);
+    if (!screenKey) return;
+
+    visibleScreenKeys[screenKey] = true;
+    var card = document.querySelector('[data-ticket-entry="' + screenKey + '"]');
+    if (!card) return;
+
+    card.style.display = '';
+
+    var title = card.querySelector('.ent-card-title');
+    if (title && cat.category_name) {
+      title.textContent = cat.category_name;
+      title.removeAttribute('data-i18n');
+    }
+
+    var desc = card.querySelector('.ent-card-desc');
+    var description = cat.category_description || cat.description || '';
+    if (desc) {
+      desc.textContent = description || '';
+      desc.removeAttribute('data-i18n');
+    }
+
+    var photo = getCategoryPhotoSources(cat)[0];
+    var photoEl = card.querySelector('.ent-card-photo');
+    if (photoEl && photo) {
+      photoEl.style.backgroundImage = 'url("' + photo.replace(/"/g, '%22') + '")';
+    }
+  });
+
+  CATEGORY_SCREEN_SEQUENCE.forEach(function(screenKey) {
+    var card = document.querySelector('[data-ticket-entry="' + screenKey + '"]');
+    if (card) {
+      card.style.display = visibleScreenKeys[screenKey] ? '' : 'none';
+    }
+  });
+}
+
 function loadCategories() {
   var xhr = new XMLHttpRequest();
   xhr.open('POST', API_URL, true);
@@ -215,11 +297,13 @@ function loadCategories() {
 }
 
 function renderCategories(categories) {
+  assignCategoryScreens(categories);
+  updateMainCategoryCards(categories);
   SCREEN_BANNERS = buildScreenBanners();
   var hasDynamicBannersInResponse = TERMINAL_CAROUSEL_IMAGES.length > 0;
 
   categories.forEach(function(cat) {
-    var screenKey = CATEGORY_SCREEN_MAP[cat.category_id];
+    var screenKey = getScreenKeyForCategory(cat);
     if (!screenKey) return;
     var screenId = 'screen-' + screenKey;
     var screen = document.getElementById(screenId);
@@ -263,7 +347,7 @@ function renderCategories(categories) {
     var filteredTariffs = tariffs;
     if (todayType && tariffs.length > 0) {
       filteredTariffs = tariffs.filter(function(t) {
-        return t.day_type === todayType;
+        return isTariffAvailableForToday(t, todayType);
       });
     }
 
@@ -320,7 +404,7 @@ function translateApiContent(categories) {
   if (lang === 'ru') return;
 
   categories.forEach(function(cat) {
-    var screenKey = CATEGORY_SCREEN_MAP[cat.category_id];
+    var screenKey = getScreenKeyForCategory(cat);
     if (!screenKey) return;
     var screen = document.getElementById('screen-' + screenKey);
     if (!screen) return;
@@ -342,7 +426,7 @@ function translateApiContent(categories) {
     var todayType = getTodayDayType();
     var filtered = tariffs;
     if (todayType && tariffs.length > 0) {
-      filtered = tariffs.filter(function(t) { return t.day_type === todayType; });
+      filtered = tariffs.filter(function(t) { return isTariffAvailableForToday(t, todayType); });
     }
     var pills = screen.querySelectorAll('.tkt-row .tkt-pill');
     filtered.forEach(function(tariff, i) {
