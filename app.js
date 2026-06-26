@@ -17,6 +17,8 @@ var runtimeCategoryScreenMap = {};
 
 var loadedCategories = [];
 var dayTypesCalendar = []; // calendar of day types for 100 days ahead
+var TERMINAL_TICKET_SECTION_ENABLED = false;
+var TERMINAL_TICKET_SECTION_TITLE = 'Билеты';
 var TERMINAL_CAROUSEL_ENABLED = false;
 var TERMINAL_CAROUSEL_IMAGES = [];
 var TERMINAL_SPLASH_IMAGE = '';
@@ -234,7 +236,42 @@ function isTariffAvailableForToday(tariff, todayType) {
   return tariff.day_type === todayType || tariff.day_type === 'universal';
 }
 
+function isTicketScreen(screenName) {
+  return CATEGORY_SCREEN_SEQUENCE.indexOf(screenName) !== -1;
+}
+
+function applyTicketSectionSettings() {
+  var section = document.getElementById('ticket-section');
+  var title = document.getElementById('ticket-section-title');
+
+  if (title) {
+    title.textContent = TERMINAL_TICKET_SECTION_TITLE || 'Билеты';
+    title.removeAttribute('data-i18n');
+  }
+
+  if (section) {
+    section.style.display = TERMINAL_TICKET_SECTION_ENABLED ? '' : 'none';
+  }
+
+  if (!TERMINAL_TICKET_SECTION_ENABLED) {
+    var activeTicketScreen = CATEGORY_SCREEN_SEQUENCE.some(function(screenKey) {
+      var screen = document.getElementById('screen-' + screenKey);
+      return Boolean(screen && screen.classList.contains('active'));
+    });
+
+    if (activeTicketScreen && typeof navigateTo === 'function') {
+      navigateTo('main');
+    }
+  }
+}
+
 function updateMainCategoryCards(categories) {
+  applyTicketSectionSettings();
+
+  if (!TERMINAL_TICKET_SECTION_ENABLED) {
+    return;
+  }
+
   var visibleScreenKeys = {};
 
   categories.forEach(function(cat) {
@@ -290,6 +327,11 @@ function loadCategories() {
       }
       TERMINAL_CAROUSEL_ENABLED = data.carousel_enabled !== false;
       TERMINAL_CAROUSEL_IMAGES = TERMINAL_CAROUSEL_ENABLED ? getCarouselImageSources(data.carousel_images || []) : [];
+      TERMINAL_TICKET_SECTION_ENABLED = data.ticket_section_enabled !== false;
+      TERMINAL_TICKET_SECTION_TITLE = (typeof data.ticket_section_title === 'string' && data.ticket_section_title.trim())
+        ? data.ticket_section_title.trim()
+        : 'Билеты';
+      applyTicketSectionSettings();
       populateMainBannerCarousel();
       TERMINAL_SPLASH_IMAGE = getImageSource(data.splash_image || '');
       applySplashImage();
@@ -310,6 +352,12 @@ function loadCategories() {
 function renderCategories(categories) {
   assignCategoryScreens(categories);
   updateMainCategoryCards(categories);
+  if (!TERMINAL_TICKET_SECTION_ENABLED) {
+    SCREEN_BANNERS = emptyScreenBanners();
+    populateScreenBanners();
+    return;
+  }
+
   SCREEN_BANNERS = buildScreenBanners();
 
   categories.forEach(function(cat) {
@@ -534,6 +582,11 @@ const screenMap = {
 };
 
 function navigateTo(screenName) {
+  if (!TERMINAL_TICKET_SECTION_ENABLED && isTicketScreen(screenName)) {
+    navigateTo('main');
+    return;
+  }
+
   const targetId = screenMap[screenName];
   if (!targetId) return;
 

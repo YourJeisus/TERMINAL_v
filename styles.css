@@ -592,6 +592,16 @@ body {
   letter-spacing: 1px;
 }
 
+.ticket-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ticket-section .section-title {
+  margin-bottom: 0;
+}
+
 /* === Ski Buttons Grid === */
 .ski-grid {
   display: flex;
