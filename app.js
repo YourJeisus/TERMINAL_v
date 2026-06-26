@@ -290,6 +290,7 @@ function loadCategories() {
       }
       TERMINAL_CAROUSEL_ENABLED = data.carousel_enabled !== false;
       TERMINAL_CAROUSEL_IMAGES = TERMINAL_CAROUSEL_ENABLED ? getCarouselImageSources(data.carousel_images || []) : [];
+      populateMainBannerCarousel();
       TERMINAL_SPLASH_IMAGE = getImageSource(data.splash_image || '');
       applySplashImage();
       if (data.categories && data.categories.length > 0) {
@@ -1556,34 +1557,66 @@ document.addEventListener('click', function(e) {
   }
 });
 
-// === Banner Carousel ===
-(function() {
+// === Main Screen Banner Carousel ===
+var mainBannerState = {
+  current: 0,
+  total: 0,
+  autoInterval: null,
+  startX: 0,
+  startY: 0,
+  isDragging: false,
+  interactionsInitialized: false
+};
+var MAIN_BANNER_AUTO_DELAY = 5000;
+
+function stopMainBannerAuto() {
+  clearInterval(mainBannerState.autoInterval);
+  mainBannerState.autoInterval = null;
+}
+
+function goToMainBanner(index) {
   var track = document.getElementById('banner-track');
   var dotsContainer = document.getElementById('banner-dots');
   if (!track || !dotsContainer) return;
+  if (mainBannerState.total <= 0) return;
 
-  // Generate slides from banner images
-  var bannerImages = [
-    'images/banner/kd_01.jpeg',
-    'images/banner/kd_02.jpg',
-    'images/banner/kd_03.jpg',
-    'images/banner/kd_04.webp',
-    'images/banner/mi_01.webp',
-    'images/banner/mi_02.webp',
-    'images/banner/mi_03.webp',
-    'images/banner/pa_01.jpeg',
-    'images/banner/pa_02.png',
-    'images/banner/pa_03.jpg',
-    'images/banner/pa_04.jpeg',
-    'images/banner/zp_01.jpg',
-    'images/banner/zp_02.jpg',
-    'images/banner/zp_03.jpg',
-    'images/banner/zp_04.jpg'
-  ];
+  if (index < 0) index = mainBannerState.total - 1;
+  if (index >= mainBannerState.total) index = 0;
+  mainBannerState.current = index;
+  track.style.transform = 'translateX(-' + (mainBannerState.current * 100) + '%)';
+  dotsContainer.querySelectorAll('.banner-dot').forEach(function(dot, i) {
+    dot.classList.toggle('active', i === mainBannerState.current);
+  });
+}
 
+function startMainBannerAuto() {
+  stopMainBannerAuto();
+  if (mainBannerState.total <= 1) return;
+  mainBannerState.autoInterval = setInterval(function() {
+    goToMainBanner(mainBannerState.current + 1);
+  }, MAIN_BANNER_AUTO_DELAY);
+}
+
+function populateMainBannerCarousel() {
+  var carousel = document.getElementById('banner-carousel');
+  var track = document.getElementById('banner-track');
+  var dotsContainer = document.getElementById('banner-dots');
+  if (!carousel || !track || !dotsContainer) return;
+
+  stopMainBannerAuto();
   track.innerHTML = '';
   dotsContainer.innerHTML = '';
-  bannerImages.forEach(function(src, i) {
+  track.style.transform = '';
+  mainBannerState.current = 0;
+  mainBannerState.total = 0;
+
+  if (!TERMINAL_CAROUSEL_ENABLED || TERMINAL_CAROUSEL_IMAGES.length === 0) {
+    carousel.style.display = 'none';
+    return;
+  }
+
+  carousel.style.display = '';
+  TERMINAL_CAROUSEL_IMAGES.forEach(function(src, i) {
     var slide = document.createElement('div');
     slide.className = 'banner';
     slide.innerHTML = '<div class="banner-bg" style="background-image:url(\'' + src + '\')"></div>';
@@ -1591,61 +1624,37 @@ document.addEventListener('click', function(e) {
 
     var dot = document.createElement('span');
     dot.className = 'banner-dot' + (i === 0 ? ' active' : '');
+    dot.addEventListener('click', function() {
+      goToMainBanner(i);
+      startMainBannerAuto();
+    });
     dotsContainer.appendChild(dot);
   });
 
-  var slides = track.querySelectorAll('.banner');
-  var dots = dotsContainer.querySelectorAll('.banner-dot');
-  var current = 0;
-  var total = slides.length;
-  var autoInterval = null;
-  var AUTO_DELAY = 5000;
+  mainBannerState.total = TERMINAL_CAROUSEL_IMAGES.length;
+  dotsContainer.style.display = mainBannerState.total > 1 ? '' : 'none';
+  startMainBannerAuto();
+}
 
-  function goTo(index) {
-    if (index < 0) index = total - 1;
-    if (index >= total) index = 0;
-    current = index;
-    track.style.transform = 'translateX(-' + (current * 100) + '%)';
-    dots.forEach(function(d, i) {
-      d.classList.toggle('active', i === current);
-    });
-  }
+function initMainBannerCarouselInteractions() {
+  if (mainBannerState.interactionsInitialized) return;
+  mainBannerState.interactionsInitialized = true;
 
-  function startAuto() {
-    stopAuto();
-    autoInterval = setInterval(function() {
-      goTo(current + 1);
-    }, AUTO_DELAY);
-  }
-
-  function stopAuto() {
-    clearInterval(autoInterval);
-  }
-
-  // Dot clicks
-  dots.forEach(function(dot, i) {
-    dot.addEventListener('click', function() {
-      goTo(i);
-      startAuto();
-    });
-  });
-
-  // Touch swipe
-  var startX = 0;
-  var startY = 0;
-  var isDragging = false;
+  var track = document.getElementById('banner-track');
+  if (!track) return;
 
   track.addEventListener('touchstart', function(e) {
-    startX = e.touches[0].clientX;
-    startY = e.touches[0].clientY;
-    isDragging = true;
-    stopAuto();
+    if (mainBannerState.total <= 1) return;
+    mainBannerState.startX = e.touches[0].clientX;
+    mainBannerState.startY = e.touches[0].clientY;
+    mainBannerState.isDragging = true;
+    stopMainBannerAuto();
   }, { passive: true });
 
   track.addEventListener('touchmove', function(e) {
-    if (!isDragging) return;
-    var dx = e.touches[0].clientX - startX;
-    var dy = e.touches[0].clientY - startY;
+    if (!mainBannerState.isDragging) return;
+    var dx = e.touches[0].clientX - mainBannerState.startX;
+    var dy = e.touches[0].clientY - mainBannerState.startY;
     // Prevent vertical scroll when swiping horizontally
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
       e.preventDefault();
@@ -1653,31 +1662,35 @@ document.addEventListener('click', function(e) {
   }, { passive: false });
 
   track.addEventListener('touchend', function(e) {
-    if (!isDragging) return;
-    isDragging = false;
-    var dx = e.changedTouches[0].clientX - startX;
-    if (dx < -50) goTo(current + 1);   // swipe left
-    else if (dx > 50) goTo(current - 1); // swipe right
-    startAuto();
+    if (!mainBannerState.isDragging) return;
+    mainBannerState.isDragging = false;
+    var dx = e.changedTouches[0].clientX - mainBannerState.startX;
+    if (dx < -50) goToMainBanner(mainBannerState.current + 1);   // swipe left
+    else if (dx > 50) goToMainBanner(mainBannerState.current - 1); // swipe right
+    startMainBannerAuto();
   }, { passive: true });
 
   // Mouse drag (for desktop testing)
   track.addEventListener('mousedown', function(e) {
-    startX = e.clientX;
-    isDragging = true;
-    stopAuto();
+    if (mainBannerState.total <= 1) return;
+    mainBannerState.startX = e.clientX;
+    mainBannerState.isDragging = true;
+    stopMainBannerAuto();
     e.preventDefault();
   });
 
   document.addEventListener('mouseup', function(e) {
-    if (!isDragging) return;
-    isDragging = false;
-    var dx = e.clientX - startX;
-    if (dx < -50) goTo(current + 1);
-    else if (dx > 50) goTo(current - 1);
-    startAuto();
+    if (!mainBannerState.isDragging) return;
+    mainBannerState.isDragging = false;
+    var dx = e.clientX - mainBannerState.startX;
+    if (dx < -50) goToMainBanner(mainBannerState.current + 1);
+    else if (dx > 50) goToMainBanner(mainBannerState.current - 1);
+    startMainBannerAuto();
   });
+}
 
-  // Start auto-rotation
-  startAuto();
+// The main carousel starts hidden and is populated only after the backend response.
+(function() {
+  initMainBannerCarouselInteractions();
+  populateMainBannerCarousel();
 })();
