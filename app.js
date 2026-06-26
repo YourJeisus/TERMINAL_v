@@ -143,10 +143,20 @@ function applySplashImage() {
     return;
   }
 
-  splashBg.style.backgroundImage = 'url(\"' + TERMINAL_SPLASH_IMAGE.replace(/\"/g, '%22') + '\")';
-  splashBg.style.backgroundSize = 'contain';
-  splashBg.style.backgroundRepeat = 'no-repeat';
-  splashBg.style.backgroundPosition = 'center';
+  var nextImage = TERMINAL_SPLASH_IMAGE;
+  var preload = new Image();
+  preload.onload = function() {
+    if (TERMINAL_SPLASH_IMAGE !== nextImage) return;
+
+    splashBg.style.backgroundImage = 'url(\"' + nextImage.replace(/\"/g, '%22') + '\")';
+    splashBg.style.backgroundSize = 'contain';
+    splashBg.style.backgroundRepeat = 'no-repeat';
+    splashBg.style.backgroundPosition = 'center';
+  };
+  preload.onerror = function() {
+    console.warn('[API] splash image failed to load:', nextImage);
+  };
+  preload.src = nextImage;
 }
 
 function buildScreenBanners() {

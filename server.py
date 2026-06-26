@@ -6,6 +6,9 @@ import base64
 import io
 import sys
 import os
+import urllib.parse
+import urllib.request
+import hashlib
 
 # --- Load .env file ---
 def load_env(path='.env'):
@@ -29,6 +32,7 @@ TERMINAL_NAME = os.environ.get('TERMINAL_NAME', 'term1')
 TERMINAL_CODE = os.environ.get('TERMINAL_CODE', '')
 TERMINAL_ID = os.environ.get('TERMINAL_ID', '1')
 BACKEND_API_BASE_URL = os.environ.get('BACKEND_API_BASE_URL', 'https://vgsport-admin.eskimos.ski').rstrip('/')
+CACHE_ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache', 'assets')
 
 print(f"[ENV] TERMINAL_NAME={TERMINAL_NAME}")
 print(f"[ENV] TERMINAL_CODE={'*' * len(TERMINAL_CODE) if TERMINAL_CODE else 'EMPTY!'}")
@@ -40,6 +44,84 @@ if not TERMINAL_CODE:
 def backend_api_url(path):
     """Build backend API URL from BACKEND_API_BASE_URL."""
     return BACKEND_API_BASE_URL + path
+
+def rewrite_backend_asset_url(value):
+    """Rewrite backend-generated local asset URLs so remote terminals can load them."""
+    if not isinstance(value, str):
+        return value
+
+    if value.startswith('/storage/'):
+        return BACKEND_API_BASE_URL + value
+
+    parsed = urllib.parse.urlparse(value)
+    if parsed.scheme not in ('http', 'https'):
+        return value
+
+    if parsed.hostname not in ('localhost', '127.0.0.1', '0.0.0.0'):
+        return value
+
+    if not parsed.path.startswith('/storage/'):
+        return value
+
+    rewritten = BACKEND_API_BASE_URL + parsed.path
+    if parsed.query:
+        rewritten += '?' + parsed.query
+
+    return rewritten
+
+def cached_asset_path_for_url(url):
+    """Build stable local cache path for a remote asset URL."""
+    parsed = urllib.parse.urlparse(url)
+    _, ext = os.path.splitext(parsed.path)
+    if not ext or len(ext) > 8:
+        ext = '.bin'
+
+    filename = hashlib.sha256(url.encode('utf-8')).hexdigest()[:24] + ext.lower()
+    return os.path.join(CACHE_ASSETS_DIR, filename), '/cache/assets/' + filename
+
+def cache_backend_asset_url(value):
+    """Download backend asset once and return a local URL for the browser."""
+    source_url = rewrite_backend_asset_url(value)
+
+    if not isinstance(source_url, str):
+        return source_url
+
+    if source_url.startswith('/cache/assets/'):
+        return source_url
+
+    parsed = urllib.parse.urlparse(source_url)
+    if parsed.scheme not in ('http', 'https') or not parsed.path.startswith('/storage/'):
+        return source_url
+
+    local_path, local_url = cached_asset_path_for_url(source_url)
+    if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+        return local_url
+
+    try:
+        os.makedirs(CACHE_ASSETS_DIR, exist_ok=True)
+        req = urllib.request.Request(source_url, headers={'User-Agent': 'TerminalVG/1.0'})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = resp.read()
+
+        tmp_path = local_path + '.tmp'
+        with open(tmp_path, 'wb') as f:
+            f.write(data)
+        os.replace(tmp_path, local_path)
+        print(f"[ASSET CACHE] Saved {source_url} -> {local_url} ({len(data)} bytes)")
+        return local_url
+    except Exception as e:
+        print(f"[ASSET CACHE] Failed {source_url}: {e}")
+        return source_url
+
+def cache_backend_asset_urls(value):
+    """Recursively cache backend asset URLs in JSON-compatible payloads."""
+    if isinstance(value, dict):
+        return {key: cache_backend_asset_urls(item) for key, item in value.items()}
+
+    if isinstance(value, list):
+        return [cache_backend_asset_urls(item) for item in value]
+
+    return cache_backend_asset_url(value)
 
 # --- Printer setup (Windows GDI, like PhotoBudka) ---
 
@@ -208,6 +290,12 @@ class TerminalHandler(http.server.SimpleHTTPRequestHandler):
             )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 resp_body = resp.read()
+
+            try:
+                resp_data = json.loads(resp_body.decode('utf-8'))
+                resp_body = json.dumps(cache_backend_asset_urls(resp_data), ensure_ascii=False).encode('utf-8')
+            except Exception as e:
+                print(f"[API PROXY] Asset cache skipped: {e}")
 
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
