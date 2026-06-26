@@ -17,6 +17,7 @@ var runtimeCategoryScreenMap = {};
 
 var loadedCategories = [];
 var dayTypesCalendar = []; // calendar of day types for 100 days ahead
+var TERMINAL_CAROUSEL_ENABLED = false;
 var TERMINAL_CAROUSEL_IMAGES = [];
 var TERMINAL_SPLASH_IMAGE = '';
 
@@ -82,21 +83,12 @@ function getTodayDayType() {
   return null; // not found in calendar
 }
 
-// Default banner images per category screen (prefix-based)
-var DEFAULT_SCREEN_BANNERS = {
-  'tickets':  ['images/banner/kd_01.jpeg','images/banner/kd_02.jpg','images/banner/kd_03.jpg','images/banner/kd_04.webp'],
-  'alpaka':   ['images/banner/pa_01.jpeg','images/banner/pa_02.png','images/banner/pa_03.jpg','images/banner/pa_04.jpeg'],
-  'museum':   ['images/banner/mi_01.webp','images/banner/mi_02.webp','images/banner/mi_03.webp'],
-  'skypark':  ['images/banner/zp_01.jpg','images/banner/zp_02.jpg','images/banner/zp_03.jpg','images/banner/zp_04.jpg']
-};
+var SCREEN_BANNERS = emptyScreenBanners();
 
-var SCREEN_BANNERS = cloneScreenBanners(DEFAULT_SCREEN_BANNERS);
-var hasDynamicScreenBanners = false;
-
-function cloneScreenBanners(source) {
+function emptyScreenBanners() {
   var result = {};
-  Object.keys(source).forEach(function(screenKey) {
-    result[screenKey] = source[screenKey].slice();
+  CATEGORY_SCREEN_SEQUENCE.forEach(function(screenKey) {
+    result[screenKey] = [];
   });
   return result;
 }
@@ -160,12 +152,13 @@ function applySplashImage() {
 }
 
 function buildScreenBanners() {
-  if (TERMINAL_CAROUSEL_IMAGES.length === 0) {
-    return cloneScreenBanners(DEFAULT_SCREEN_BANNERS);
+  var result = emptyScreenBanners();
+
+  if (!TERMINAL_CAROUSEL_ENABLED || TERMINAL_CAROUSEL_IMAGES.length === 0) {
+    return result;
   }
 
-  var result = {};
-  Object.keys(DEFAULT_SCREEN_BANNERS).forEach(function(screenKey) {
+  CATEGORY_SCREEN_SEQUENCE.forEach(function(screenKey) {
     result[screenKey] = TERMINAL_CAROUSEL_IMAGES.slice();
   });
 
@@ -295,7 +288,8 @@ function loadCategories() {
         dayTypesCalendar = data.day_types_calendar;
         console.log('[API] Loaded day_types_calendar: ' + dayTypesCalendar.length + ' days, today=' + getTodayDayType());
       }
-      TERMINAL_CAROUSEL_IMAGES = getCarouselImageSources(data.carousel_images || []);
+      TERMINAL_CAROUSEL_ENABLED = data.carousel_enabled !== false;
+      TERMINAL_CAROUSEL_IMAGES = TERMINAL_CAROUSEL_ENABLED ? getCarouselImageSources(data.carousel_images || []) : [];
       TERMINAL_SPLASH_IMAGE = getImageSource(data.splash_image || '');
       applySplashImage();
       if (data.categories && data.categories.length > 0) {
@@ -316,7 +310,6 @@ function renderCategories(categories) {
   assignCategoryScreens(categories);
   updateMainCategoryCards(categories);
   SCREEN_BANNERS = buildScreenBanners();
-  var hasDynamicBannersInResponse = TERMINAL_CAROUSEL_IMAGES.length > 0;
 
   categories.forEach(function(cat) {
     var screenKey = getScreenKeyForCategory(cat);
@@ -326,8 +319,7 @@ function renderCategories(categories) {
     if (!screen) return;
 
     var categoryPhotos = getCategoryPhotoSources(cat);
-    if (categoryPhotos.length > 0) {
-      hasDynamicBannersInResponse = true;
+    if (TERMINAL_CAROUSEL_ENABLED && categoryPhotos.length > 0) {
       var existingBanners = SCREEN_BANNERS[screenKey] || [];
       categoryPhotos.slice().reverse().forEach(function(src) {
         var existingIndex = existingBanners.indexOf(src);
@@ -403,10 +395,7 @@ function renderCategories(categories) {
     }
   });
 
-  if (hasDynamicBannersInResponse || hasDynamicScreenBanners) {
-    populateScreenBanners();
-  }
-  hasDynamicScreenBanners = hasDynamicBannersInResponse;
+  populateScreenBanners();
 
   lucide.createIcons();
   // Re-apply translations after dynamic content is rendered
@@ -480,16 +469,24 @@ function translateApiContent(categories) {
   });
 }
 
-// Populate ticket screen carousels from SCREEN_BANNERS (runs immediately, no API needed)
+// Populate ticket screen carousels from API-provided SCREEN_BANNERS only.
 function populateScreenBanners() {
-  Object.keys(SCREEN_BANNERS).forEach(function(screenKey) {
+  CATEGORY_SCREEN_SEQUENCE.forEach(function(screenKey) {
     var screenId = 'screen-' + screenKey;
     var screen = document.getElementById(screenId);
     if (!screen) return;
+    var carousel = screen.querySelector('.tkt-carousel');
     var track = screen.querySelector('.tkt-carousel-track');
     if (!track) return;
     var banners = SCREEN_BANNERS[screenKey];
     track.innerHTML = '';
+
+    if (!TERMINAL_CAROUSEL_ENABLED || !banners || banners.length === 0) {
+      if (carousel) carousel.style.display = 'none';
+      return;
+    }
+
+    if (carousel) carousel.style.display = '';
     banners.forEach(function(src) {
       var img = document.createElement('img');
       img.src = src;
