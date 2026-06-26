@@ -15,6 +15,8 @@ var CATEGORY_SCREEN_MAP = {
 
 var loadedCategories = [];
 var dayTypesCalendar = []; // calendar of day types for 100 days ahead
+var TERMINAL_CAROUSEL_IMAGES = [];
+var TERMINAL_SPLASH_IMAGE = '';
 
 // === Auto-translate API text via MyMemory (free, no key) ===
 var TRANSLATE_LANGMAP = { en: 'ru|en', ar: 'ru|ar', zh: 'ru|zh-CN' };
@@ -78,13 +80,109 @@ function getTodayDayType() {
   return null; // not found in calendar
 }
 
-// Banner images per category screen (prefix-based)
-var SCREEN_BANNERS = {
+// Default banner images per category screen (prefix-based)
+var DEFAULT_SCREEN_BANNERS = {
   'tickets':  ['images/banner/kd_01.jpeg','images/banner/kd_02.jpg','images/banner/kd_03.jpg','images/banner/kd_04.webp'],
   'alpaka':   ['images/banner/pa_01.jpeg','images/banner/pa_02.png','images/banner/pa_03.jpg','images/banner/pa_04.jpeg'],
   'museum':   ['images/banner/mi_01.webp','images/banner/mi_02.webp','images/banner/mi_03.webp'],
   'skypark':  ['images/banner/zp_01.jpg','images/banner/zp_02.jpg','images/banner/zp_03.jpg','images/banner/zp_04.jpg']
 };
+
+var SCREEN_BANNERS = cloneScreenBanners(DEFAULT_SCREEN_BANNERS);
+var hasDynamicScreenBanners = false;
+
+function cloneScreenBanners(source) {
+  var result = {};
+  Object.keys(source).forEach(function(screenKey) {
+    result[screenKey] = source[screenKey].slice();
+  });
+  return result;
+}
+
+function getCarouselImageSources(images) {
+  if (!Array.isArray(images)) {
+    return [];
+  }
+
+  return images.map(function(image) {
+    if (typeof image === 'string') {
+      return image;
+    }
+
+    if (image && typeof image.url === 'string') {
+      return image.url;
+    }
+
+    return '';
+  }).filter(Boolean);
+}
+
+function getImageSource(image) {
+  if (typeof image === 'string') {
+    return image;
+  }
+
+  if (image && typeof image.url === 'string') {
+    return image.url;
+  }
+
+  return '';
+}
+
+function applySplashImage() {
+  var splashBg = document.querySelector('#screen-splash .splash-bg');
+  if (!splashBg) return;
+
+  if (!TERMINAL_SPLASH_IMAGE) {
+    splashBg.style.backgroundImage = '';
+    return;
+  }
+
+  splashBg.style.backgroundImage = 'url(\"' + TERMINAL_SPLASH_IMAGE.replace(/\"/g, '%22') + '\")';
+}
+
+function buildScreenBanners() {
+  if (TERMINAL_CAROUSEL_IMAGES.length === 0) {
+    return cloneScreenBanners(DEFAULT_SCREEN_BANNERS);
+  }
+
+  var result = {};
+  Object.keys(DEFAULT_SCREEN_BANNERS).forEach(function(screenKey) {
+    result[screenKey] = TERMINAL_CAROUSEL_IMAGES.slice();
+  });
+
+  return result;
+}
+
+function getCategoryPhotoSources(cat) {
+  var raw = cat.category_photo || cat.photo || cat.photos || '';
+
+  if (Array.isArray(raw)) {
+    return raw.filter(Boolean);
+  }
+
+  if (typeof raw !== 'string') {
+    return [];
+  }
+
+  var value = raw.trim();
+  if (!value) {
+    return [];
+  }
+
+  if (value.charAt(0) === '[') {
+    try {
+      var parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.filter(Boolean);
+      }
+    } catch (e) {
+      console.warn('[API] category_photo JSON parse failed:', e);
+    }
+  }
+
+  return [value];
+}
 
 function loadCategories() {
   var xhr = new XMLHttpRequest();
@@ -99,6 +197,9 @@ function loadCategories() {
         dayTypesCalendar = data.day_types_calendar;
         console.log('[API] Loaded day_types_calendar: ' + dayTypesCalendar.length + ' days, today=' + getTodayDayType());
       }
+      TERMINAL_CAROUSEL_IMAGES = getCarouselImageSources(data.carousel_images || []);
+      TERMINAL_SPLASH_IMAGE = getImageSource(data.splash_image || '');
+      applySplashImage();
       if (data.categories && data.categories.length > 0) {
         loadedCategories = data.categories;
         renderCategories(data.categories);
@@ -114,6 +215,9 @@ function loadCategories() {
 }
 
 function renderCategories(categories) {
+  SCREEN_BANNERS = buildScreenBanners();
+  var hasDynamicBannersInResponse = TERMINAL_CAROUSEL_IMAGES.length > 0;
+
   categories.forEach(function(cat) {
     var screenKey = CATEGORY_SCREEN_MAP[cat.category_id];
     if (!screenKey) return;
@@ -121,14 +225,29 @@ function renderCategories(categories) {
     var screen = document.getElementById(screenId);
     if (!screen) return;
 
+    var categoryPhotos = getCategoryPhotoSources(cat);
+    if (categoryPhotos.length > 0) {
+      hasDynamicBannersInResponse = true;
+      var existingBanners = SCREEN_BANNERS[screenKey] || [];
+      categoryPhotos.slice().reverse().forEach(function(src) {
+        var existingIndex = existingBanners.indexOf(src);
+        if (existingIndex !== -1) {
+          existingBanners.splice(existingIndex, 1);
+        }
+        existingBanners.unshift(src);
+      });
+      SCREEN_BANNERS[screenKey] = existingBanners;
+    }
+
     // Update title
     var titleEl = screen.querySelector('.tkt-title');
     if (titleEl && cat.category_name) titleEl.textContent = cat.category_name;
 
     // Update description (preserve line breaks from API)
     var descEl = screen.querySelector('.tkt-description p');
-    if (descEl && cat.category_description) {
-      var safe = cat.category_description
+    var description = cat.category_description || cat.description || '';
+    if (descEl && description) {
+      var safe = description
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/\r\n/g, '<br>').replace(/\n/g, '<br>').replace(/\r/g, '<br>');
       descEl.innerHTML = safe;
@@ -183,6 +302,11 @@ function renderCategories(categories) {
       });
     }
   });
+
+  if (hasDynamicBannersInResponse || hasDynamicScreenBanners) {
+    populateScreenBanners();
+  }
+  hasDynamicScreenBanners = hasDynamicBannersInResponse;
 
   lucide.createIcons();
   // Re-apply translations after dynamic content is rendered
@@ -242,9 +366,10 @@ function translateApiContent(categories) {
 
     // Translate description separately (can be long)
     var descEl = screen.querySelector('.tkt-description p');
-    if (descEl && cat.category_description) {
+    var description = cat.category_description || cat.description || '';
+    if (descEl && description) {
       // Strip \r\n for translation, restore <br> after
-      var plain = cat.category_description.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      var plain = description.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
       translateText(plain, lang, function(translated) {
         var safe = translated
           .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -1109,7 +1234,8 @@ function registerTicketsInEskimos(paymentCode, callback) {
         var ticketCodes = [];
         if (data.transaction && data.transaction.tickets) {
           data.transaction.tickets.forEach(function(t) {
-            if (t.ticket_code) ticketCodes.push(t.ticket_code);
+            var code = t.ticket_code || t.ticket_number;
+            if (code) ticketCodes.push(code);
           });
         }
         callback(ticketCodes, null);

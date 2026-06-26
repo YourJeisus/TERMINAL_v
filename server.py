@@ -28,12 +28,18 @@ load_env()
 TERMINAL_NAME = os.environ.get('TERMINAL_NAME', 'term1')
 TERMINAL_CODE = os.environ.get('TERMINAL_CODE', '')
 TERMINAL_ID = os.environ.get('TERMINAL_ID', '1')
+BACKEND_API_BASE_URL = os.environ.get('BACKEND_API_BASE_URL', 'https://vgsport-admin.eskimos.ski').rstrip('/')
 
 print(f"[ENV] TERMINAL_NAME={TERMINAL_NAME}")
 print(f"[ENV] TERMINAL_CODE={'*' * len(TERMINAL_CODE) if TERMINAL_CODE else 'EMPTY!'}")
 print(f"[ENV] TERMINAL_ID={TERMINAL_ID}")
+print(f"[ENV] BACKEND_API_BASE_URL={BACKEND_API_BASE_URL}")
 if not TERMINAL_CODE:
     print("[ENV] WARNING: TERMINAL_CODE is empty! Set it in .env file")
+
+def backend_api_url(path):
+    """Build backend API URL from BACKEND_API_BASE_URL."""
+    return BACKEND_API_BASE_URL + path
 
 # --- Printer setup (Windows GDI, like PhotoBudka) ---
 
@@ -190,7 +196,7 @@ class TerminalHandler(http.server.SimpleHTTPRequestHandler):
                 'terminal_code': TERMINAL_CODE
             }).encode()
 
-            api_url = 'https://vgsport-admin.eskimos.ski/api/v1/tickets/terminal/categories'
+            api_url = backend_api_url('/api/v1/tickets/terminal/categories')
             req = urllib.request.Request(
                 api_url,
                 data=payload,
@@ -234,7 +240,7 @@ class TerminalHandler(http.server.SimpleHTTPRequestHandler):
 
             payload = json.dumps(data).encode()
 
-            api_url = 'https://vgsport-admin.eskimos.ski/api/v1/tickets/terminal/create'
+            api_url = backend_api_url('/api/v1/tickets/terminal/create')
             req = urllib.request.Request(
                 api_url,
                 data=payload,
@@ -272,7 +278,7 @@ class TerminalHandler(http.server.SimpleHTTPRequestHandler):
 
             payload = json.dumps(data).encode()
 
-            api_url = 'https://vgsport-admin.eskimos.ski/api/v1/tickets/terminal/email'
+            api_url = backend_api_url('/api/v1/tickets/terminal/email')
             req = urllib.request.Request(
                 api_url,
                 data=payload,
