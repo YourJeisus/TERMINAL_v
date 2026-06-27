@@ -9,6 +9,8 @@ import os
 import urllib.parse
 import urllib.request
 import hashlib
+import re
+import time
 
 # --- Load .env file ---
 def load_env(path='.env'):
@@ -127,6 +129,8 @@ def cache_backend_asset_urls(value):
 
 PRINTER = None
 PRINTER_NAME = None
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PRINTS_DIR = os.path.join(BASE_DIR, 'prints')
 
 def init_printer():
     """Detect default printer on Windows."""
@@ -194,6 +198,49 @@ def print_image_gdi(img_bytes):
         return False, f"GDI print error: {e}"
 
 
+def render_pdf_first_page_to_png(pdf_bytes):
+    """Render the first PDF page to PNG bytes for Windows GDI printing."""
+    try:
+        import fitz
+
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        if doc.page_count < 1:
+            return None, "PDF has no pages"
+
+        page = doc.load_page(0)
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+        return pixmap.tobytes("png"), "PDF rendered"
+    except ImportError as e:
+        return None, f"Missing library: {e}. Run: pip install PyMuPDF"
+    except Exception as e:
+        return None, f"PDF render error: {e}"
+
+
+def safe_print_filename(name):
+    """Return a filesystem-safe PDF filename."""
+    if not name:
+        name = f"ticket-{int(time.time())}.pdf"
+    name = os.path.basename(str(name))
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
+    if not name:
+        name = f"ticket-{int(time.time())}.pdf"
+    if not name.lower().endswith(".pdf"):
+        name += ".pdf"
+    return name
+
+
+def save_print_pdf(pdf_bytes, filename):
+    """Save print PDF for diagnostics and audit."""
+    os.makedirs(PRINTS_DIR, exist_ok=True)
+    target = os.path.join(PRINTS_DIR, safe_print_filename(filename))
+    if os.path.exists(target):
+        base, ext = os.path.splitext(target)
+        target = f"{base}-{int(time.time())}{ext}"
+    with open(target, "wb") as f:
+        f.write(pdf_bytes)
+    return target
+
+
 # --- HTTP Server ---
 
 class TerminalHandler(http.server.SimpleHTTPRequestHandler):
@@ -232,33 +279,42 @@ class TerminalHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(404)
 
     def _handle_print(self):
-        """Receive base64 PNG image → print via Windows GDI."""
+        """Receive base64 PDF → save it and print via Windows GDI."""
         try:
             length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(length)
             data = json.loads(body)
 
-            img_data = data.get('image', '')
+            pdf_data = data.get('pdf', '')
+            if not pdf_data:
+                raise ValueError("Missing pdf payload")
             # Strip data URL prefix if present
-            if ',' in img_data:
-                img_data = img_data.split(',', 1)[1]
+            if ',' in pdf_data:
+                pdf_data = pdf_data.split(',', 1)[1]
 
-            img_bytes = base64.b64decode(img_data)
+            pdf_bytes = base64.b64decode(pdf_data)
+            pdf_path = save_print_pdf(pdf_bytes, data.get('filename'))
 
             if sys.platform == "win32" and PRINTER_NAME:
+                img_bytes, render_message = render_pdf_first_page_to_png(pdf_bytes)
+                if not img_bytes:
+                    raise RuntimeError(render_message)
                 success, message = print_image_gdi(img_bytes)
+                message = f"{message}; saved PDF: {os.path.basename(pdf_path)}"
             else:
                 # Simulate on non-Windows
                 success = True
                 message = "Print simulated (not Windows)"
-                print(f"[PRINT SIMULATED] Received {len(img_bytes)} bytes")
+                print(f"[PRINT SIMULATED] Received PDF {len(pdf_bytes)} bytes -> {pdf_path}")
 
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({
                 'success': success,
-                'message': message
+                'message': message,
+                'format': 'pdf',
+                'file': os.path.basename(pdf_path)
             }).encode())
 
         except Exception as e:

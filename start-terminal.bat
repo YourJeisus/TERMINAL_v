@@ -21,7 +21,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [3/7] Installing print libraries...
-python -m pip install --quiet pywin32 Pillow >nul 2>&1
+python -m pip install --quiet pywin32 Pillow PyMuPDF >nul 2>&1
 
 echo [4/7] Setting silent print policy...
 REG ADD "HKLM\SOFTWARE\Policies\Google\Chrome" /v SilentPrintingEnabled /t REG_DWORD /d 1 /f >nul 2>&1

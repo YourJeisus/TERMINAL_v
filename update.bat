@@ -100,7 +100,7 @@ del /q "%PY_EXE%" >nul 2>&1
 
 :python_ok
 echo  [OK] Python found.
-python -m pip install --quiet pywin32 Pillow >nul 2>&1
+python -m pip install --quiet pywin32 Pillow PyMuPDF >nul 2>&1
 echo  [OK] Libraries ready.
 goto :done
 

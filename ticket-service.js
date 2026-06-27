@@ -239,13 +239,13 @@ const TicketService = {
   printTicket(ticket, onDone) {
     var self = this;
 
-    // Render ticket to canvas → PNG
-    var dataURL = this._renderTicketCanvas(ticket);
+    // Render ticket to PDF and send it to local print server.
+    var pdfDataURL = this._renderTicketPdf(ticket);
 
     // Try local print server (silent, like PhotoBudka)
-    this._printViaServer(dataURL, function(success) {
+    this._printViaServer(pdfDataURL, ticket, function(success) {
       if (success) {
-        console.log('[PRINT] Sent via server GDI: ' + ticket.number);
+        console.log('[PRINT] Sent PDF via server GDI: ' + ticket.number);
         if (onDone) setTimeout(onDone, 500);
       } else {
         // Fallback: window.print() with #print-area
@@ -258,7 +258,7 @@ const TicketService = {
   // Draw entire ticket on Canvas (576px = 80mm at 203 DPI)
   // Design from Pencil: bill_VG.pen → "Ticket Vorobyovy Gory"
   // Scale factor: 576/302 ≈ 1.91
-  _renderTicketCanvas(ticket) {
+  _renderTicketCanvasElement(ticket) {
     var W = 576;
     var S = W / 302; // scale from design px to canvas px
     var PAD = Math.floor(20 * S); // 20px padding in design
@@ -398,12 +398,56 @@ const TicketService = {
     rctx.rotate(Math.PI);
     rctx.drawImage(trimmed, -rotated.width / 2, -rotated.height / 2);
 
-    return rotated.toDataURL('image/png');
+    return rotated;
   },
 
-  // Send PNG to local print server (Python GDI)
-  _printViaServer(dataURL, callback) {
-    if (!dataURL) { callback(false); return; }
+  _renderTicketCanvas(ticket) {
+    return this._renderTicketCanvasElement(ticket).toDataURL('image/png');
+  },
+
+  _renderTicketPdf(ticket) {
+    var canvas = this._renderTicketCanvasElement(ticket);
+    var jpegDataURL = canvas.toDataURL('image/jpeg', 0.95);
+    var jpegBinary = atob(jpegDataURL.split(',', 2)[1]);
+    var pageWidth = 80 / 25.4 * 72;
+    var pageHeight = pageWidth * canvas.height / canvas.width;
+    var pageWidthText = pageWidth.toFixed(2);
+    var pageHeightText = pageHeight.toFixed(2);
+    var content = 'q\n' +
+      pageWidthText + ' 0 0 ' + pageHeightText + ' 0 0 cm\n' +
+      '/Im0 Do\n' +
+      'Q\n';
+
+    var objects = [
+      '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+      '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+      '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + pageWidthText + ' ' + pageHeightText + '] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>\nendobj\n',
+      '4 0 obj\n<< /Length ' + content.length + ' >>\nstream\n' + content + 'endstream\nendobj\n',
+      '5 0 obj\n<< /Type /XObject /Subtype /Image /Width ' + canvas.width + ' /Height ' + canvas.height + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + jpegBinary.length + ' >>\nstream\n' + jpegBinary + '\nendstream\nendobj\n'
+    ];
+
+    var pdf = '%PDF-1.4\n%\xE2\xE3\xCF\xD3\n';
+    var offsets = [0];
+    for (var i = 0; i < objects.length; i++) {
+      offsets.push(pdf.length);
+      pdf += objects[i];
+    }
+
+    var xrefOffset = pdf.length;
+    pdf += 'xref\n0 ' + (objects.length + 1) + '\n';
+    pdf += '0000000000 65535 f \n';
+    for (var j = 1; j < offsets.length; j++) {
+      pdf += String(offsets[j]).padStart(10, '0') + ' 00000 n \n';
+    }
+    pdf += 'trailer\n<< /Size ' + (objects.length + 1) + ' /Root 1 0 R >>\n';
+    pdf += 'startxref\n' + xrefOffset + '\n%%EOF';
+
+    return 'data:application/pdf;base64,' + btoa(pdf);
+  },
+
+  // Send PDF to local print server (Python renders PDF and prints via GDI)
+  _printViaServer(pdfDataURL, ticket, callback) {
+    if (!pdfDataURL) { callback(false); return; }
 
     var xhr = new XMLHttpRequest();
     xhr.open('POST', 'http://localhost:9999/print', true);
@@ -417,7 +461,11 @@ const TicketService = {
     };
     xhr.onerror = function() { callback(false); };
     xhr.ontimeout = function() { callback(false); };
-    xhr.send(JSON.stringify({ image: dataURL }));
+    xhr.send(JSON.stringify({
+      format: 'pdf',
+      pdf: pdfDataURL,
+      filename: (ticket.number || 'ticket') + '.pdf'
+    }));
   },
 
   // Fallback: window.print() with #print-area
