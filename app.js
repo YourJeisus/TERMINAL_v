@@ -301,6 +301,49 @@ function handleRentalCreateClick() {
     return;
   }
 
+  openRentalClientForm();
+}
+
+function openRentalClientForm() {
+  var modal = document.getElementById('rental-client-modal');
+  var nameInput = document.getElementById('rental-client-name');
+  var phoneInput = document.getElementById('rental-client-phone');
+  var errorEl = document.getElementById('rental-client-error');
+
+  if (nameInput) nameInput.value = '';
+  if (phoneInput) phoneInput.value = '';
+  if (errorEl) errorEl.textContent = '';
+  if (modal) modal.classList.add('active');
+
+  setTimeout(function() {
+    if (nameInput) nameInput.focus();
+  }, 50);
+}
+
+function closeRentalClientForm() {
+  var modal = document.getElementById('rental-client-modal');
+  if (modal) modal.classList.remove('active');
+}
+
+function submitRentalClientForm(event) {
+  if (event) event.preventDefault();
+
+  var nameInput = document.getElementById('rental-client-name');
+  var phoneInput = document.getElementById('rental-client-phone');
+  var errorEl = document.getElementById('rental-client-error');
+  var clientName = nameInput ? nameInput.value.trim() : '';
+  var clientPhone = phoneInput ? phoneInput.value.trim() : '';
+
+  if (!clientName || !clientPhone) {
+    if (errorEl) errorEl.textContent = 'Укажите имя и телефон клиента';
+    return;
+  }
+
+  closeRentalClientForm();
+  createRentalOrderForClient(clientName, clientPhone);
+}
+
+function createRentalOrderForClient(clientName, clientPhone) {
   showPrintLoader();
 
   var xhr = new XMLHttpRequest();
@@ -333,7 +376,10 @@ function handleRentalCreateClick() {
     hidePrintLoader();
     showAlert('Таймаут сервера');
   };
-  xhr.send(JSON.stringify({}));
+  xhr.send(JSON.stringify({
+    client_name: clientName,
+    client_phone: clientPhone
+  }));
 }
 
 function handleRentalPaymentClick() {

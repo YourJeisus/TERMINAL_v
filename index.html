@@ -858,6 +858,31 @@
       </div>
     </div>
 
+    <!-- Форма клиента для создания проката -->
+    <div class="rental-client-modal" id="rental-client-modal">
+      <form class="rental-client-card" onsubmit="submitRentalClientForm(event)">
+        <div class="rental-client-header">
+          <h2>Новый прокат</h2>
+          <button class="rental-client-close" type="button" onclick="closeRentalClientForm()">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <label class="rental-client-field">
+          <span>Имя клиента</span>
+          <input id="rental-client-name" type="text" autocomplete="name" maxlength="255">
+        </label>
+        <label class="rental-client-field">
+          <span>Телефон</span>
+          <input id="rental-client-phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="255">
+        </label>
+        <p class="rental-client-error" id="rental-client-error"></p>
+        <div class="rental-client-actions">
+          <button class="rental-client-secondary" type="button" onclick="closeRentalClientForm()">Отмена</button>
+          <button class="rental-client-primary" type="submit">Создать</button>
+        </div>
+      </form>
+    </div>
+
     <!-- Область печати билета (видна только через @media print) -->
     <div id="print-area"></div>
 

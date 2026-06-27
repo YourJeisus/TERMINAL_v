@@ -400,7 +400,7 @@ class TerminalHandler(http.server.SimpleHTTPRequestHandler):
 
     def _handle_rental_create_proxy(self):
         """Proxy terminal rental order creation — injects terminal_code from .env."""
-        self._proxy_rental_request('/api/v1/rent/terminal/orders', drain_body=True, log_prefix='RENT CREATE')
+        self._proxy_rental_request('/api/v1/rent/terminal/orders', log_prefix='RENT CREATE')
 
     def _handle_rental_lookup_proxy(self):
         """Proxy terminal rental order lookup — injects terminal_code from .env."""
