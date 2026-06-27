@@ -203,10 +203,13 @@ const TicketService = {
     var price = this.formatPrice(ticket.totalPrice);
     var logoURL = getLogoURL();
 
+    var title = ticket.title || 'Билет';
+    var scanHint = ticket.scanHint || 'Для прохода - отсканируйте этот код:';
+
     return '<div class="t">' +
       '<img class="logo" src="' + logoURL + '">' +
       '<div class="ln"></div>' +
-      '<div class="tw"><div class="tt">Билет</div><div class="tp">' + ticket.type + '</div></div>' +
+      '<div class="tw"><div class="tt">' + title + '</div><div class="tp">' + ticket.type + '</div></div>' +
       '<div class="ln"></div>' +
       '<div class="it">' +
       '<div class="ir"><span class="il">Стоимость</span><span class="iv">' + price + '</span></div>' +
@@ -215,7 +218,7 @@ const TicketService = {
       '<div class="ir"><span class="il">Номер</span><span class="iv">' + ticket.number + '</span></div>' +
       '</div>' +
       '<div class="ln"></div>' +
-      '<div class="ss"><div class="st">Для прохода - отсканируйте этот код:</div>' +
+      '<div class="ss"><div class="st">' + scanHint + '</div>' +
       '<div class="qb"><img src="' + qrBigURL + '"></div></div>' +
       '<div class="ln"></div>' +
       '<div class="ct">+7 (495) 123-82-61</div>' +
@@ -286,10 +289,10 @@ const TicketService = {
     // Line 1 (1px design = 2px canvas)
     ctx.fillRect(PAD, y, W - PAD * 2, 2); y += Math.floor(20 * S);
 
-    // Title: "Билет" — Roboto 26px 900
+    // Title
     ctx.font = '900 ' + Math.floor(26 * S) + 'px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Билет', W / 2, y + Math.floor(26 * S));
+    ctx.fillText(ticket.title || 'Билет', W / 2, y + Math.floor(26 * S));
     y += Math.floor(34 * S);
 
     // Ticket type — Roboto 12px 800
@@ -343,7 +346,7 @@ const TicketService = {
     // Scan text — single line, Roboto 12px 800
     ctx.font = '800 ' + fontSize + 'px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Для прохода - отсканируйте этот код:', W / 2, y + fontSize);
+    ctx.fillText(ticket.scanHint || 'Для прохода - отсканируйте этот код:', W / 2, y + fontSize);
     y += Math.floor(36 * S);
 
     // QR code — use Eskimos ticket_code if available

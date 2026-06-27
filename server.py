@@ -222,6 +222,12 @@ class TerminalHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_tickets_proxy()
         elif self.path == '/api/tickets/email':
             self._handle_email_proxy()
+        elif self.path == '/api/rental/orders':
+            self._handle_rental_create_proxy()
+        elif self.path == '/api/rental/orders/lookup':
+            self._handle_rental_lookup_proxy()
+        elif self.path.startswith('/api/rental/orders/') and self.path.endswith('/pay'):
+            self._handle_rental_pay_proxy()
         else:
             self.send_error(404)
 
@@ -391,6 +397,64 @@ class TerminalHandler(http.server.SimpleHTTPRequestHandler):
                 'message': str(e)
             }).encode())
             print(f"[EMAIL] Error: {e}")
+
+    def _handle_rental_create_proxy(self):
+        """Proxy terminal rental order creation — injects terminal_code from .env."""
+        self._proxy_rental_request('/api/v1/rent/terminal/orders', drain_body=True, log_prefix='RENT CREATE')
+
+    def _handle_rental_lookup_proxy(self):
+        """Proxy terminal rental order lookup — injects terminal_code from .env."""
+        self._proxy_rental_request('/api/v1/rent/terminal/orders/lookup', log_prefix='RENT LOOKUP')
+
+    def _handle_rental_pay_proxy(self):
+        """Proxy terminal rental order payment confirmation — injects terminal_code from .env."""
+        prefix = '/api/rental/orders/'
+        suffix = '/pay'
+        order_key = self.path[len(prefix):-len(suffix)]
+        self._proxy_rental_request('/api/v1/rent/terminal/orders/' + order_key + '/pay', log_prefix='RENT PAY')
+
+    def _proxy_rental_request(self, backend_path, drain_body=False, log_prefix='RENT'):
+        import urllib.error
+        import urllib.request
+
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length) if length > 0 else b''
+            data = {} if drain_body else (json.loads(body) if body else {})
+            data['terminal_code'] = TERMINAL_CODE
+
+            payload = json.dumps(data).encode()
+
+            req = urllib.request.Request(
+                backend_api_url(backend_path),
+                data=payload,
+                headers={'Content-Type': 'application/json'},
+                method='POST'
+            )
+
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    status = resp.status
+                    resp_body = resp.read()
+            except urllib.error.HTTPError as e:
+                status = e.code
+                resp_body = e.read()
+
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(resp_body)
+            print(f"[{log_prefix}] Backend {status}, {len(resp_body)} bytes")
+
+        except Exception as e:
+            self.send_response(502)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                'error': True,
+                'message': str(e)
+            }).encode())
+            print(f"[{log_prefix}] Error: {e}")
 
     def do_GET(self):
         if self.path == '/printer-status':

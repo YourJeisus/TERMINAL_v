@@ -19,6 +19,11 @@ var loadedCategories = [];
 var dayTypesCalendar = []; // calendar of day types for 100 days ahead
 var TERMINAL_TICKET_SECTION_ENABLED = false;
 var TERMINAL_TICKET_SECTION_TITLE = 'Билеты';
+var TERMINAL_RENTAL_SECTION_ENABLED = false;
+var TERMINAL_RENTAL_SECTION_TITLE = 'Прокат';
+var TERMINAL_RENTAL_CREATE_ENABLED = false;
+var TERMINAL_RENTAL_PAYMENT_ENABLED = false;
+var pendingRentalPaymentOrder = null;
 var TERMINAL_CAROUSEL_ENABLED = false;
 var TERMINAL_CAROUSEL_IMAGES = [];
 var TERMINAL_SPLASH_IMAGE = '';
@@ -265,6 +270,176 @@ function applyTicketSectionSettings() {
   }
 }
 
+function applyRentalSectionSettings() {
+  var section = document.getElementById('terminal-rental-section');
+  var title = document.getElementById('terminal-rental-title');
+  var createButton = document.getElementById('terminal-rental-create-btn');
+  var paymentButton = document.getElementById('terminal-rental-payment-btn');
+
+  if (title) {
+    title.textContent = TERMINAL_RENTAL_SECTION_TITLE || 'Прокат';
+    title.removeAttribute('data-i18n');
+  }
+
+  if (createButton) {
+    createButton.style.display = TERMINAL_RENTAL_CREATE_ENABLED ? '' : 'none';
+  }
+
+  if (paymentButton) {
+    paymentButton.style.display = TERMINAL_RENTAL_PAYMENT_ENABLED ? '' : 'none';
+  }
+
+  if (section) {
+    var hasVisibleActions = TERMINAL_RENTAL_CREATE_ENABLED || TERMINAL_RENTAL_PAYMENT_ENABLED;
+    section.style.display = TERMINAL_RENTAL_SECTION_ENABLED && hasVisibleActions ? '' : 'none';
+  }
+}
+
+function handleRentalCreateClick() {
+  if (!TERMINAL_RENTAL_CREATE_ENABLED) {
+    showAlert('Создание проката отключено');
+    return;
+  }
+
+  showPrintLoader();
+
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', LOCAL_SERVER + '/api/rental/orders', true);
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  xhr.timeout = 15000;
+  xhr.onload = function() {
+    try {
+      var data = JSON.parse(xhr.responseText);
+      if (xhr.status >= 400 || data.status !== 'ok' || !data.order) {
+        throw new Error(data.message || 'Не удалось создать заказ проката');
+      }
+
+      printRentalOrderTicket(data.order, function() {
+        hidePrintLoader();
+        showAlert('Талон проката напечатан');
+        navigateTo('main');
+      });
+    } catch (e) {
+      hidePrintLoader();
+      console.error('[RENTAL] Create parse/error:', e);
+      showAlert(e.message || 'Ошибка создания проката');
+    }
+  };
+  xhr.onerror = function() {
+    hidePrintLoader();
+    showAlert('Ошибка связи с сервером');
+  };
+  xhr.ontimeout = function() {
+    hidePrintLoader();
+    showAlert('Таймаут сервера');
+  };
+  xhr.send(JSON.stringify({}));
+}
+
+function handleRentalPaymentClick() {
+  if (!TERMINAL_RENTAL_PAYMENT_ENABLED) {
+    showAlert('Оплата проката отключена');
+    return;
+  }
+
+  var orderKey = window.prompt('Отсканируйте QR заказа проката');
+  if (!orderKey || !orderKey.trim()) {
+    return;
+  }
+
+  lookupRentalOrderForPayment(orderKey.trim());
+}
+
+function printRentalOrderTicket(order, onDone) {
+  var orderKey = order.order_key || '';
+  var qrPayload = order.qr_payload || ('rent_order:' + orderKey);
+  var ticket = TicketService.createTicket([
+    { name: 'Заказ проката ' + orderKey, price: 0, qty: 1 }
+  ], 0, 'Без оплаты');
+
+  ticket.title = 'Прокат';
+  ticket.type = 'Заказ ' + orderKey;
+  ticket.number = orderKey || ticket.number;
+  ticket.qrCode = qrPayload;
+  ticket.scanHint = 'Для оформления проката отсканируйте QR в рентлайне';
+
+  try {
+    TicketService.printTicket(ticket, function() {
+      if (onDone) onDone();
+    });
+  } catch (e) {
+    console.error('[RENTAL] Print failed:', e);
+    if (onDone) onDone();
+  }
+}
+
+function lookupRentalOrderForPayment(orderKey) {
+  showPaymentLoader('Проверяем заказ проката...');
+
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', LOCAL_SERVER + '/api/rental/orders/lookup', true);
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  xhr.timeout = 15000;
+  xhr.onload = function() {
+    hidePaymentLoader();
+    try {
+      var data = JSON.parse(xhr.responseText);
+      if (xhr.status >= 400 || data.status !== 'ok' || !data.order) {
+        throw new Error(data.message || 'Заказ проката не найден');
+      }
+
+      startRentalOrderPayment(data.order);
+    } catch (e) {
+      console.error('[RENTAL] Lookup failed:', e);
+      showAlert(e.message || 'Ошибка поиска заказа');
+    }
+  };
+  xhr.onerror = function() {
+    hidePaymentLoader();
+    showAlert('Ошибка связи с сервером');
+  };
+  xhr.ontimeout = function() {
+    hidePaymentLoader();
+    showAlert('Таймаут сервера');
+  };
+  xhr.send(JSON.stringify({ order_key: orderKey }));
+}
+
+function startRentalOrderPayment(order) {
+  if (!order.can_pay) {
+    showAlert(order.payment_block_reason || 'Заказ не готов к оплате');
+    return;
+  }
+
+  var total = parseInt(order.total || 0);
+  if (!total || total <= 0) {
+    showAlert('Сумма проката не указана');
+    return;
+  }
+
+  pendingRentalPaymentOrder = order;
+  paymentSourceScreen = 'rental-order';
+  pendingCartItems = [{ name: 'Прокат ' + (order.order_key || ''), price: total, qty: 1 }];
+  pendingCartTotal = total;
+
+  var payTotalEl = document.getElementById('pay-total-value');
+  if (payTotalEl) payTotalEl.textContent = formatPrice(pendingCartTotal) + ' ₽';
+
+  var orderItems = document.getElementById('pay-order-items');
+  if (orderItems) {
+    orderItems.innerHTML = '';
+    var row = document.createElement('div');
+    row.className = 'pay-order-row';
+    row.innerHTML = '<div class="pay-order-row-name"><span class="pay-order-dot"></span><span class="pay-order-row-label">Прокат ' +
+      (order.order_key || '') + '</span></div><span class="pay-order-row-price">' +
+      formatPrice(total) + ' ₽</span>';
+    orderItems.appendChild(row);
+  }
+
+  navigateTo('payment');
+  payByCard();
+}
+
 function updateMainCategoryCards(categories) {
   applyTicketSectionSettings();
 
@@ -331,7 +506,14 @@ function loadCategories() {
       TERMINAL_TICKET_SECTION_TITLE = (typeof data.ticket_section_title === 'string' && data.ticket_section_title.trim())
         ? data.ticket_section_title.trim()
         : 'Билеты';
+      TERMINAL_RENTAL_SECTION_ENABLED = data.rental_section_enabled === true;
+      TERMINAL_RENTAL_SECTION_TITLE = (typeof data.rental_section_title === 'string' && data.rental_section_title.trim())
+        ? data.rental_section_title.trim()
+        : 'Прокат';
+      TERMINAL_RENTAL_CREATE_ENABLED = data.rental_create_enabled === true;
+      TERMINAL_RENTAL_PAYMENT_ENABLED = data.rental_payment_enabled === true;
       applyTicketSectionSettings();
+      applyRentalSectionSettings();
       populateMainBannerCarousel();
       TERMINAL_SPLASH_IMAGE = getImageSource(data.splash_image || '');
       applySplashImage();
@@ -1177,6 +1359,12 @@ function processPayment() {
 // Back from payment method screen
 function goBackFromPayment() {
   hidePaymentLoader();
+  if (paymentSourceScreen === 'rental-order') {
+    pendingRentalPaymentOrder = null;
+    navigateTo('main');
+    return;
+  }
+
   if (paymentSourceScreen) {
     navigateTo(paymentSourceScreen);
   } else {
@@ -1408,6 +1596,11 @@ function registerTicketsInEskimos(paymentCode, callback) {
 }
 
 function completePayment(paymentMethod) {
+  if (paymentSourceScreen === 'rental-order') {
+    completeRentalOrderPayment(paymentMethod);
+    return;
+  }
+
   lastPaymentMethod = paymentMethod;
   pendingTickets = [];
 
@@ -1459,6 +1652,56 @@ function completePayment(paymentMethod) {
     // Safety: if printing hangs, proceed after 8 seconds
     setTimeout(onPrintFinished, 8000);
   });
+}
+
+function completeRentalOrderPayment(paymentMethod) {
+  lastPaymentMethod = paymentMethod;
+
+  if (!pendingRentalPaymentOrder || !pendingRentalPaymentOrder.order_key) {
+    showAlert('Заказ проката не выбран');
+    goBackFromPayment();
+    return;
+  }
+
+  var paymentCode = generatePaymentCode();
+  lastPaymentCode = paymentCode;
+  showPaymentLoader('Подтверждаем оплату проката...');
+
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', LOCAL_SERVER + '/api/rental/orders/' + encodeURIComponent(pendingRentalPaymentOrder.order_key) + '/pay', true);
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  xhr.timeout = 15000;
+  xhr.onload = function() {
+    hidePaymentLoader();
+    try {
+      var data = JSON.parse(xhr.responseText);
+      if (xhr.status >= 400 || data.status !== 'ok') {
+        throw new Error(data.message || 'Не удалось подтвердить оплату проката');
+      }
+
+      pendingRentalPaymentOrder = null;
+      navigateTo('success');
+      showReceiptInline();
+    } catch (e) {
+      console.error('[RENTAL] Pay confirm failed:', e);
+      showAlert(e.message || 'Ошибка подтверждения проката');
+      goBackFromPayment();
+    }
+  };
+  xhr.onerror = function() {
+    hidePaymentLoader();
+    showAlert('Ошибка связи с сервером');
+    goBackFromPayment();
+  };
+  xhr.ontimeout = function() {
+    hidePaymentLoader();
+    showAlert('Таймаут сервера');
+    goBackFromPayment();
+  };
+  xhr.send(JSON.stringify({
+    sum: pendingCartTotal,
+    terminal_payment_code: paymentCode
+  }));
 }
 
 // === Receipt (inline on success card) ===
